@@ -1,0 +1,265 @@
+Hive Notes:
+-----------
+
+ITVERSITY:
+----------
+
+create database chaitanyapolipalli_daily_revenue_txt;
+
+create table orders
+(order_id int, order_date string, order_customer_id int, order_status string) 
+ROW FORMAT 
+DELIMITED FIELDS TERMINATED BY ',' 
+LINES TERMINATED BY '\n' 
+STORED AS TEXTFILE;
+
+describe formatted orders;
+
+/*No concept of primary key in hive but even if they exist they are informational purpose only, indexers are not that reliable in hive. In recent versions they might have added but until */
+
+LOAD DATA LOCAL INPATH '/home/chaitanyapolipalli/retail_db/orders' OVERWRITE INTO TABLE chaitanyapolipalli_daily_revenue_txt.orders;
+
+/*When ur loading data into hive table and by mistake if u give wrong path, hive doesn't validate data and the command runs successfully. */
+
+create table order_items(
+order_item_id int,
+order_item_order_id int,
+order_item_product_id int,
+order_item_quantity int,
+order_item_subtotal float,
+order_item_product_price float)
+row format delimited 
+fields terminated by ','
+lines terminated by '\n'
+stored as textfile;
+
+load data local inpath '/home/chaitanyapolipalli/retail_db/order_items' overwrite into table chaitanyapolipalli_daily_revenue_txt.order_items;
+
+/*You can not load a text file into an ORC (or any other file format other than textfile) table directly. The typical practice is to create a temporary Hive table, load the text file into the temporary table, then let Hive populate the ORC table:*/
+
+create database chaitanyapolipalli_daily_revenue_orc;
+use chaitanyapolipalli_daily_revenue_orc;
+
+create table orders(
+order_id int, order_date string, order_customer_id int, order_status string)
+stored as orc;
+
+create table order_items(
+order_item_id int,
+order_item_order_id int,
+order_item_product_id int,
+order_item_quantity int,
+order_item_subtotal float,
+order_item_product_price float)
+stored as orc;
+
+insert into orders select * from chaitanyapolipalli_daily_revenue_txt.orders;
+insert into order_items select * from chaitanyapolipalli_daily_revenue_txt.order_items;
+
+create table customers(
+customer_id int,
+customer_fname string,
+customer_lname string,
+customer_email string,
+customer_password string,
+customer_street string,
+customer_city string,
+customer_state string,
+customer_zipcode string)
+row format delimited fields terminated by ','
+lines terminated by '\n'
+stored as textfile;
+
+load data local inpath '/home/chaitanyapolipalli/retail_db/customers' overwrite into table customers;
+
+
+String functions examples:
+-------------------------
+
+select "hello" like "hello";
+OK
+true
+
+select "hello" like "hello ";
+OK
+false
+
+select "hello" like "hello%";
+OK
+true
+
+select length("hello");
+OK
+5
+
+select lpad("15",5,0);
+OK
+00015
+
+select cast("44" as int);
+OK
+44
+
+select cast("str" as int);
+OK
+NULL
+
+select cast(1 < 0 as boolean);
+OK
+false
+
+select cast(1 > 0 as boolean);
+OK
+true
+
+Data Functions Examples:
+-------------------------
+
+select current_date;
+OK
+2018-08-08
+
+select current_timestamp;
+OK
+2018-08-08 15:49:59.1
+
+select date_format(current_date,"MMM/dd/yyyy");
+OK
+Aug/08/2018
+
+select date_format(current_date,"EEE, MMM d, ''yy");
+OK
+Wed, Aug 8, '18
+
+select to_unix_timestamp(current_timestamp);
+OK
+1533760680
+
+select from_unixtime(1533760680);
+OK
+2018-08-08 16:38:00
+
+select to_date(from_unixtime(1533760680));
+OK
+2018-08-08
+
+
+CASE Function Example:
+----------------------
+describe function case;
+OK
+CASE a WHEN b THEN c [WHEN d THEN e]* [ELSE f] END - When a = b, returns c; when a = d, return e; else return f
+
+
+Row-Level Transformations Example:
+----------------------------------
+
+select cast(date_format(order_date,"YYYYMM") as int) from orders limit 100;
+
+Joins Example:
+--------------
+
+select o.*, c.* from orders o inner join customers c on o.order_customer_id = c.customer_id limit 100;
+
+select o.*,c.* from orders o left outer join customers c on o.order_customer_id = c.customer_id limit 10;
+
+Aggregations Examples:
+----------------------
+
+select o.order_id, o.order_date, o.order_status, round(sum(order_item_subtotal),2) revenue 
+from orders o join order_items 
+oi on o.order_id = oi.order_item_order_id 
+where o.order_status = 'COMPLETE' or o.order_status = 'CLOSED'
+group by order_id,o.order_date, o.order_status 
+having sum(order_item_subtotal) >= 1000
+order by o.order_id, revenue desc; 
+
+select o.order_date, round(sum(order_item_subtotal),2) revenue 
+from orders o join order_items oi on o.order_id = oi.order_item_order_id 
+where o.order_status = 'COMPLETE' or o.order_status = 'CLOSED'
+group by o.order_date
+order by o.order_date,revenue desc
+limit 10;
+
+Sorting Examples:
+-----------------
+/*Here we are sorting within each date data is sorted by revenue in descending order*/
+select o.order_date, round(sum(order_item_subtotal),2) revenue 
+from orders o join order_items oi on o.order_id = oi.order_item_order_id 
+where o.order_status = 'COMPLETE' or o.order_status = 'CLOSED'
+group by o.order_date
+distribute by o.order_date sort by o.order_date,revenue desc
+limit 10;
+
+Analytical Functions Examples:
+------------------------------
+"Refer Hive Cookbook"
+
+select o.order_id, o.order_date, o.order_status, order_item_subtotal, 
+round(sum(order_item_subtotal) over (partition by o.order_id),2) revenue,  
+concat(round((order_item_subtotal/round(sum(order_item_subtotal) over(partition by o.order_id),2))*100,2),"%") percentage 
+from orders o join order_items 
+oi on o.order_id = oi.order_item_order_id 
+where o.order_status = 'COMPLETE' or o.order_status = 'CLOSED'
+order by o.order_id, revenue desc;
+
+select * from 
+(
+select o.order_id, o.order_date, o.order_status, order_item_subtotal, 
+round(sum(order_item_subtotal) over (partition by o.order_id),2) revenue,  
+concat(round((order_item_subtotal/round(sum(order_item_subtotal) over(partition by o.order_id),2))*100,2),"%") percentage 
+from orders o join order_items 
+oi on o.order_id = oi.order_item_order_id 
+where o.order_status = 'COMPLETE' or o.order_status = 'CLOSED'
+) q
+where revenue >= 1000
+order by order_id, revenue desc
+
+
+Ranking Functions Examples:
+---------------------------
+"Refer Hive Cookbook"
+
+select * from 
+(
+select o.order_id, o.order_date, o.order_status, order_item_subtotal, 
+round(sum(order_item_subtotal) over (partition by o.order_id),2) revenue,  
+concat(round((order_item_subtotal/round(sum(order_item_subtotal) over(partition by o.order_id),2))*100,2),"%") Pct, 
+rank() over (partition by o.order_id order by oi.order_item_subtotal desc) Rank_Revenue, 
+dense_rank() over (partition by o.order_id order by oi.order_item_subtotal desc) Dense_Rank_Revenue,
+percent_rank() over (partition by o.order_id order by oi.order_item_subtotal desc) Pct_Rank_Revenue,
+row_number() over (partition by o.order_id order by oi.order_item_subtotal desc) Row_Num_Partition,
+row_number() over (order by o.order_id) Row_Num 
+from orders o join order_items 
+oi on o.order_id = oi.order_item_order_id 
+where o.order_status = 'COMPLETE' or o.order_status = 'CLOSED'
+) q
+where revenue >= 1000
+order by order_id, revenue desc, Rank_Revenue;
+
+
+Windowing Functions Examples:
+-----------------------------
+"Refer Hive Cookbook"
+https://acadgild.com/blog/windowing-functions-in-hive
+
+select * from 
+(
+select o.order_id, o.order_date, o.order_status, order_item_subtotal, 
+round(sum(order_item_subtotal) over (partition by o.order_id),2) revenue,  
+concat(round((order_item_subtotal/round(sum(order_item_subtotal) over(partition by o.order_id),2))*100,2),"%") Pct, 
+rank() over (partition by o.order_id order by oi.order_item_subtotal desc) Rank_Revenue, 
+dense_rank() over (partition by o.order_id order by oi.order_item_subtotal desc) Dense_Rank_Revenue,
+percent_rank() over (partition by o.order_id order by oi.order_item_subtotal desc) Pct_Rank_Revenue,
+row_number() over (partition by o.order_id order by oi.order_item_subtotal desc) Row_Num_Partition,
+row_number() over (order by o.order_id) Row_Num,
+lead(oi.order_item_subtotal) over (partition by order_id order by oi.order_item_subtotal desc) LEAD,
+lag(oi.order_item_subtotal) over (partition by order_id order by oi.order_item_subtotal desc) lag,
+first_value(oi.order_item_subtotal) over (partition by order_id order by oi.order_item_subtotal desc) FIRST,
+last_value(oi.order_item_subtotal) over (partition by order_id order by oi.order_item_subtotal desc) LAST
+from orders o join order_items 
+oi on o.order_id = oi.order_item_order_id 
+where o.order_status = 'COMPLETE' or o.order_status = 'CLOSED'
+) q
+where revenue >= 1000
+order by order_id, revenue desc, Rank_Revenue;
